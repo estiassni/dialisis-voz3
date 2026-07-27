@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Checklist por voz</title>
+<style>
+  :root{
+    --bg: #F6F4EF;
+    --ink: #163430;
+    --ink-soft: #4B635F;
+    --teal: #2E7D6B;
+    --teal-dim: #DCE9E5;
+    --amber: #C97B3D;
+    --amber-dim: #F3E2D0;
+    --done: #8A9A96;
+    --danger: #B4483C;
+  }
+  *{box-sizing:border-box;}
+  html,body{
+    margin:0; padding:0; height:100%;
+    background:var(--bg); color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  #app{
+    min-height:100vh; min-height:100dvh;
+    display:flex; flex-direction:column;
+    padding: max(20px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom));
+  }
+
+  /* ---------- Pantalla de configuración ---------- */
+  #setup{ display:flex; flex-direction:column; flex:1; gap:16px; padding-top:8px; }
+  #setup h1{
+    font-size:26px; font-weight:700; letter-spacing:-0.01em; margin:0 0 2px;
+  }
+  #setup p.sub{ margin:0; color:var(--ink-soft); font-size:15px; line-height:1.45; }
+  textarea{
+    flex:1; min-height:220px; resize:vertical;
+    border:1.5px solid var(--teal-dim); border-radius:14px;
+    padding:16px; font-size:16px; line-height:1.6;
+    background:#FFFFFF; color:var(--ink); font-family:inherit;
+  }
+  textarea:focus{ outline:none; border-color:var(--teal); }
+  label.small{ font-size:13px; color:var(--ink-soft); }
+  .row{ display:flex; align-items:center; gap:10px; }
+  select{
+    border:1.5px solid var(--teal-dim); border-radius:10px; padding:8px 10px;
+    font-size:15px; background:#fff; color:var(--ink);
+  }
+  button{
+    -webkit-tap-highlight-color: transparent;
+    border:none; cursor:pointer; font-family:inherit;
+  }
+  #startBtn{
+    background:var(--teal); color:#fff; font-size:18px; font-weight:700;
+    padding:18px; border-radius:16px; letter-spacing:0.01em;
+  }
+  #startBtn:active{ transform:scale(0.98); }
+  #warn{
+    font-size:13px; color:var(--ink-soft); background:var(--teal-dim);
+    border-radius:10px; padding:10px 12px; line-height:1.5;
+  }
+
+  /* ---------- Pantalla de ejecución ---------- */
+  #runner{ display:none; flex:1; flex-direction:column; }
+  #topbar{ display:flex; justify-content:space-between; align-items:center; }
+  #counter{ font-size:14px; font-weight:700; color:var(--ink-soft); letter-spacing:0.04em; }
+  #exitBtn{ background:none; color:var(--ink-soft); font-size:14px; text-decoration:underline; padding:6px; }
+
+  #progressTrack{
+    height:5px; background:var(--teal-dim); border-radius:4px; margin:14px 0 6px; overflow:hidden;
+  }
+  #progressFill{ height:100%; background:var(--teal); border-radius:4px; transition:width .4s ease; }
+
+  #stepArea{
+    flex:1; display:flex; flex-direction:column; justify-content:center; align-items:center;
+    text-align:center; gap:18px; padding:10px 0;
+  }
+  #stepNum{
+    font-size:15px; font-weight:700; color:var(--teal); letter-spacing:0.08em;
+  }
+  #stepText{
+    font-size:clamp(26px, 6.5vw, 38px); font-weight:700; line-height:1.28;
+    color:var(--ink); max-width:640px;
+  }
+
+  #statusZone{ display:flex; flex-direction:column; align-items:center; gap:14px; padding-bottom:10px; }
+
+  #pulseWrap{ position:relative; width:88px; height:88px; display:flex; align-items:center; justify-content:center; }
+  #pulseRing{
+    position:absolute; width:100%; height:100%; border-radius:50%;
+    background:var(--teal); opacity:0.25;
+  }
+  #pulseRing.listening{ animation:pulse 1.4s ease-out infinite; }
+  #pulseCore{
+    width:52px; height:52px; border-radius:50%;
+    background:var(--teal); display:flex; align-items:center; justify-content:center;
+    color:#fff; font-size:22px; z-index:1; transition:background .25s ease;
+  }
+  #pulseCore.amber{ background:var(--amber); }
+  #pulseCore.idle{ background:var(--done); }
+  @keyframes pulse{
+    0%{ transform:scale(0.9); opacity:0.35; }
+    70%{ transform:scale(1.9); opacity:0; }
+    100%{ transform:scale(1.9); opacity:0; }
+  }
+
+  #statusLabel{ font-size:15px; font-weight:600; color:var(--ink-soft); min-height:20px; }
+  #heard{ font-size:13px; color:var(--ink-soft); opacity:0.8; min-height:16px; }
+
+  #manualBar{ display:flex; gap:10px; margin-top:6px; }
+  #manualBar button{
+    flex:1; padding:14px; border-radius:12px; font-size:15px; font-weight:600;
+  }
+  #confirmBtn{ background:var(--teal); color:#fff; }
+  #repeatBtn{ background:var(--teal-dim); color:var(--ink); }
+
+  #doneScreen{ display:none; flex:1; flex-direction:column; align-items:center; justify-content:center; text-align:center; gap:10px; }
+  #doneScreen h2{ font-size:24px; margin:0; }
+  #doneScreen p{ color:var(--ink-soft); margin:0; font-size:15px; }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- CONFIGURACIÓN -->
+  <div id="setup">
+    <h1>Checklist por voz</h1>
+    <p class="sub">Pega o edita tus pasos, uno por línea. Al pulsar Iniciar, la app leerá cada paso en voz alta y esperará que digas <strong>"listo"</strong> (o "hecho", "sí", "confirmado") para pasar al siguiente.</p>
+    <textarea id="stepsInput" spellcheck="false">Lavarse las manos
+Limpiar la mesa con el paño especial
+Traer a la mesa: 2 campos estériles azules
+Traer a la mesa: 2 jeringas grandes de 10 mililitros
+Traer a la mesa: 2 jeringas pequeñas de 5 mililitros
+Traer a la mesa: 1 paquete de gasas
+Traer a la mesa: 1 par de guantes estériles
+Traer a la mesa: 1 mascarilla
+Traer a la mesa: 1 jeringa de heparina, si se precisa
+Traer a la mesa: líquido desinfectante de material
+Traer a la mesa: líquido desinfectante de manos
+Traer a la mesa: spray para despegar esparadrapo
+Traer a la mesa: 6 tiras de esparadrapo
+Ponerse la mascarilla
+Abrir el campo estéril tomándolo por las puntas, con la parte no satinada hacia arriba
+Colocar todo el material preparado dentro del campo estéril
+Colocar la línea arterial roja encima de la mesa
+Ponerse líquido desinfectante en las manos
+Abrir el apósito del catéter y colocar la talla por debajo
+Desinfectar con el spray el catéter, el orificio, la línea arterial roja, la línea venosa azul y el bioconector del suero
+Romper el sello de la bolsa del suero
+Colocarse los guantes estériles
+Limpiar el catéter con la gasa
+Colocar la gasa encima del catéter
+Llenar con suero la jeringa grande para la rama roja, evitando dejar burbujas de aire
+Llenar con suero la jeringa grande para la rama azul, evitando dejar burbujas de aire
+Quitar el clamp en las 2 ramas del catéter
+Conectar la jeringa pequeña en la rama roja del catéter y aspirar la mitad
+Conectar la jeringa pequeña en la rama azul del catéter y aspirar la mitad
+Conectar la jeringa grande de suero en la rama roja y aspirar y expulsar 3 veces de forma enérgica
+Conectar la jeringa grande de suero en la rama azul y aspirar y expulsar 3 veces de forma enérgica
+Cerrar la talla azul y pegarla con esparadrapos
+Conectar la línea arterial roja en la rama arterial roja del catéter
+Desconectar la línea venosa de la bolsa de drenaje y conectarla a la rama venosa del catéter
+Cerrar el clamp de la línea del suero
+Abrir el clamp de la línea arterial y el de la rama arterial del catéter
+Abrir el clamp de la línea venosa y el de la rama venosa
+Confirmar conexión en la pantalla
+Preparar en la mesa: 1 talla estéril
+Preparar en la mesa: 2 jeringas grandes
+Preparar en la mesa: 2 jeringas de heparina para sellar el catéter
+Preparar en la mesa: 2 pares de guantes estériles
+Preparar en la mesa: 1 mascarilla
+Preparar en la mesa: el saco del catéter
+Preparar en la mesa: líquido desinfectante de manos
+Abrir la talla del catéter
+Desinfectar con el spray el catéter, el orificio, la línea arterial roja, la línea venosa azul y el bioconector de la bolsa de suero salino
+Desinfectar las manos
+Colocarse los guantes estériles
+Llenar con suero la jeringa grande para la rama roja, evitando dejar burbujas de aire
+Llenar con suero la jeringa grande para la rama azul, evitando dejar burbujas de aire
+En la tablet, pulsar el botón Retornar
+Cerrar el clamp arterial de la línea de sangre
+Desconectar la línea roja arterial del catéter y conectarla al suero
+Abrir el clamp arterial de la línea de sangre
+Pulsar Iniciar bomba de sangre
+Conectar la jeringa grande de suero en la rama roja arterial del catéter e introducir todo el suero
+Esperar a que termine el retorno, hasta que el sensor bajo la cámara atrapa-burbujas no detecte sangre
+Cuando aparezca Retorno completo, cerrar la pinza azul y la pinza roja
+Conectar la jeringa grande de suero en la rama azul del catéter e introducir todo el suero
+Conectar la jeringa de heparina en la rama roja del catéter e introducir 2 mililitros
+Conectar la jeringa de heparina en la rama azul del catéter e introducir 2 mililitros
+Cerrar las 2 pinzas del catéter
+Desconectar la rama roja del catéter y conectarla a la bolsa de suero
+Desconectar la rama azul del catéter
+Colocar las ramas del catéter dentro del saco
+Pegar los 2 apósitos encima del saco
+Pulsar Abrir bomba de sangre
+Pulsar Drenar casete</textarea>
+    <div class="row">
+      <label class="small" for="voiceRate">Velocidad de voz</label>
+      <select id="voiceRate">
+        <option value="0.85">Lenta</option>
+        <option value="1" selected>Normal</option>
+        <option value="1.15">Rápida</option>
+      </select>
+    </div>
+    <div id="warn">Nota: el reconocimiento de voz necesita permiso de micrófono y conexión segura (https). Si no escucha, revisa los permisos del navegador para este sitio.</div>
+    <button id="startBtn">Iniciar checklist ▶</button>
+  </div>
+
+  <!-- EJECUCIÓN -->
+  <div id="runner">
+    <div id="topbar">
+      <div id="counter">PASO 1 / 1</div>
+      <button id="exitBtn">Terminar</button>
+    </div>
+    <div id="progressTrack"><div id="progressFill" style="width:0%"></div></div>
+
+    <div id="stepArea">
+      <div id="stepNum"></div>
+      <div id="stepText">—</div>
+    </div>
+
+    <div id="statusZone">
+      <div id="pulseWrap">
+        <div id="pulseRing"></div>
+        <div id="pulseCore" class="idle">🎙</div>
+      </div>
+      <div id="statusLabel">Preparando…</div>
+      <div id="heard"></div>
+      <div id="manualBar">
+        <button id="repeatBtn">Repetir paso</button>
+        <button id="confirmBtn">Confirmar (toque)</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- FIN -->
+  <div id="doneScreen">
+    <h2>Procedimiento completado ✓</h2>
+    <p>Se confirmaron todos los pasos.</p>
+    <button id="restartBtn" style="margin-top:18px; background:var(--teal); color:#fff; padding:14px 22px; border-radius:12px; font-size:15px; font-weight:600;">Volver al inicio</button>
+  </div>
+
+</div>
+
+<script>
+(function(){
+  const setupEl = document.getElementById('setup');
+  const runnerEl = document.getElementById('runner');
+  const doneEl = document.getElementById('doneScreen');
+
+  const stepsInput = document.getElementById('stepsInput');
+  const startBtn = document.getElementById('startBtn');
+  const voiceRateSel = document.getElementById('voiceRate');
+
+  const counterEl = document.getElementById('counter');
+  const progressFill = document.getElementById('progressFill');
+  const stepNumEl = document.getElementById('stepNum');
+  const stepTextEl = document.getElementById('stepText');
+  const statusLabel = document.getElementById('statusLabel');
+  const heardEl = document.getElementById('heard');
+  const pulseRing = document.getElementById('pulseRing');
+  const pulseCore = document.getElementById('pulseCore');
+  const confirmBtn = document.getElementById('confirmBtn');
+  const repeatBtn = document.getElementById('repeatBtn');
+  const exitBtn = document.getElementById('exitBtn');
+  const restartBtn = document.getElementById('restartBtn');
+
+  let steps = [];
+  let idx = 0;
+  let rate = 1;
+  let recognizing = false;
+  let recognition = null;
+  let autoRestart = true;
+  let watchdogTimer = null;
+
+  const CONFIRM_WORDS = ['listo','lista','hecho','hecha','sí','si','confirmado','confirmo','ok','vale','siguiente'];
+  const REPEAT_WORDS = ['repite','repetir','otra vez','de nuevo','no entendí'];
+
+  const SpeechRecognitionImpl = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+  function speak(text, onEnd){
+    try{
+      window.speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = 'es-ES';
+      u.rate = rate;
+      u.onend = function(){ if(onEnd) onEnd(); };
+      u.onerror = function(){ if(onEnd) onEnd(); };
+      window.speechSynthesis.speak(u);
+    }catch(e){
+      if(onEnd) onEnd();
+    }
+  }
+
+  function setStatus(text, mode){
+    statusLabel.textContent = text;
+    pulseCore.classList.remove('amber','idle');
+    pulseRing.classList.remove('listening');
+    if(mode === 'listening'){
+      pulseRing.classList.add('listening');
+    } else if(mode === 'amber'){
+      pulseCore.classList.add('amber');
+    } else {
+      pulseCore.classList.add('idle');
+    }
+  }
+
+  function renderStep(){
+    stepNumEl.textContent = 'PASO ' + (idx+1);
+    counterEl.textContent = 'PASO ' + (idx+1) + ' / ' + steps.length;
+    stepTextEl.textContent = steps[idx];
+    progressFill.style.width = Math.round(((idx)/steps.length)*100) + '%';
+    heardEl.textContent = '';
+  }
+
+  function finish(){
+    runnerEl.style.display = 'none';
+    doneEl.style.display = 'flex';
+    speak('Procedimiento completado. Se confirmaron todos los pasos.');
+  }
+
+  function goNext(){
+    idx++;
+    if(idx >= steps.length){
+      finish();
+      return;
+    }
+    renderStep();
+    playCurrentStep();
+  }
+
+  function playCurrentStep(){
+    setStatus('Hablando…', 'amber');
+    speak(steps[idx] + '. Diga listo cuando lo haya hecho.', function(){
+      startListening();
+    });
+  }
+
+  function clearWatchdog(){
+    if(watchdogTimer){ clearTimeout(watchdogTimer); watchdogTimer = null; }
+  }
+
+  function startListening(){
+    if(!SpeechRecognitionImpl){
+      setStatus('Reconocimiento de voz no disponible en este navegador. Use el botón.', 'idle');
+      return;
+    }
+    if(recognizing) return;
+    autoRestart = true;
+    try{
+      recognition = new SpeechRecognitionImpl();
+      recognition.lang = 'es-ES';
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.maxAlternatives = 3;
+
+      recognition.onstart = function(){
+        recognizing = true;
+        setStatus('Escuchando… diga "listo"', 'listening');
+        clearWatchdog();
+        // Red de seguridad: si en 12s no pasó nada (ni resultado, ni error, ni fin),
+        // forzamos un reinicio para que nunca se quede "colgado".
+        watchdogTimer = setTimeout(function(){
+          if(recognizing){
+            try{ recognition.abort(); }catch(e){}
+            recognizing = false;
+            setStatus('Reiniciando escucha…', 'listening');
+            setTimeout(startListening, 300);
+          }
+        }, 12000);
+      };
+
+      recognition.onresult = function(event){
+        clearWatchdog();
+        let transcript = '';
+        for(let i=0;i<event.results.length;i++){
+          transcript += event.results[i][0].transcript + ' ';
+        }
+        transcript = transcript.toLowerCase().trim();
+        heardEl.textContent = 'Escuché: "' + transcript + '"';
+
+        const said = w => transcript.indexOf(w) !== -1;
+        if(CONFIRM_WORDS.some(said)){
+          autoRestart = false;
+          setStatus('Confirmado ✓', 'idle');
+          setTimeout(goNext, 350);
+        } else if(REPEAT_WORDS.some(said)){
+          autoRestart = false;
+          playCurrentStep();
+        } else {
+          // No reconocido: dejamos que onend reinicie la escucha automáticamente.
+          setStatus('No reconocí eso. Escuchando de nuevo…', 'listening');
+        }
+      };
+
+      recognition.onerror = function(event){
+        clearWatchdog();
+        if(event.error === 'not-allowed' || event.error === 'service-not-allowed'){
+          autoRestart = false;
+          setStatus('Permiso de micrófono denegado. Use el botón para confirmar.', 'idle');
+        } else if(event.error === 'no-speech'){
+          setStatus('No se detectó voz. Escuchando de nuevo…', 'listening');
+        } else {
+          setStatus('Error de reconocimiento. Escuchando de nuevo…', 'listening');
+        }
+      };
+
+      recognition.onend = function(){
+        recognizing = false;
+        clearWatchdog();
+        if(autoRestart){
+          setTimeout(startListening, 350);
+        }
+      };
+
+      recognition.start();
+    }catch(e){
+      setStatus('No se pudo iniciar el micrófono. Reintentando…', 'idle');
+      setTimeout(startListening, 800);
+    }
+  }
+
+  confirmBtn.addEventListener('click', function(){
+    autoRestart = false;
+    clearWatchdog();
+    if(recognition){ try{ recognition.stop(); }catch(e){} }
+    window.speechSynthesis.cancel();
+    setStatus('Confirmado ✓', 'idle');
+    setTimeout(goNext, 200);
+  });
+
+  repeatBtn.addEventListener('click', function(){
+    autoRestart = false;
+    clearWatchdog();
+    if(recognition){ try{ recognition.stop(); }catch(e){} }
+    playCurrentStep();
+  });
+
+  exitBtn.addEventListener('click', function(){
+    autoRestart = false;
+    clearWatchdog();
+    window.speechSynthesis.cancel();
+    if(recognition){ try{ recognition.stop(); }catch(e){} }
+    location.reload();
+  });
+
+  restartBtn.addEventListener('click', function(){
+    location.reload();
+  });
+
+  startBtn.addEventListener('click', function(){
+    const raw = stepsInput.value.split('\n').map(s => s.trim()).filter(Boolean);
+    if(raw.length === 0){
+      alert('Escribe al menos un paso.');
+      return;
+    }
+    steps = raw;
+    idx = 0;
+    rate = parseFloat(voiceRateSel.value);
+
+    setupEl.style.display = 'none';
+    runnerEl.style.display = 'flex';
+
+    // "despertar" la síntesis de voz con este mismo toque de usuario
+    speak(' ', function(){
+      renderStep();
+      playCurrentStep();
+    });
+  });
+})();
+</script>
+</body>
+</html>
